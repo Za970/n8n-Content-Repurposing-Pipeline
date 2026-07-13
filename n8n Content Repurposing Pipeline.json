@@ -1,0 +1,277 @@
+{
+  "name": "n8n Content Repurposing Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Repurpose Content",
+        "formDescription": "Paste a blog URL or YouTube URL",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Content Type",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "blog"
+                  },
+                  {
+                    "option": "youtube"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "URL"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -48,
+        -128
+      ],
+      "id": "c7b1a5d5-1baf-4b18-a2e5-e94c77c3808e",
+      "name": "On form submission",
+      "webhookId": "b7c5f6f6-83ce-47fa-b5de-bf55d40a68cd"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.URL }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        128,
+        -128
+      ],
+      "id": "1bd73763-866b-40a7-b8da-4a9b0e1c8587",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "articleText",
+              "cssSelector": ".body"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        272,
+        -128
+      ],
+      "id": "fd4040fc-9bd4-437d-a58b-a8f1c2e37f7b",
+      "name": "HTML"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.first().json.articleText;\n\n// Collapse whitespace\ntext = text.replace(/\\s+/g, ' ').trim();\n\n// Remove bracketed artifacts like [Music]\ntext = text.replace(/\\[.*?\\]/g, '');\n\n// Cap length so we don't blow past AI token limits\nconst MAX_CHARS = 6000;\nif (text.length > MAX_CHARS) {\n  text = text.substring(0, MAX_CHARS) + '...';\n}\n\nreturn [{\n  json: {\n    cleanedText: text\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        96
+      ],
+      "id": "1a462c4a-fea0-4506-839b-bea9c5230411",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a social media repurposing assistant. Given source content, generate exactly three outputs. Respond ONLY with valid JSON, no markdown, no preamble, in this exact structure:\n       {\n         \"linkedin_post\": \"string, 150-250 words, professional tone, 1-2 relevant hashtags\",\n         \"twitter_thread\": [\"tweet 1\", \"tweet 2\", \"tweet 3\"],\n         \"instagram_caption\": \"string, 100-150 words, casual tone, 5-8 hashtags at the end\"\n       }"
+            },
+            {
+              "content": "={{ $json.cleanedText }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        128,
+        96
+      ],
+      "id": "8e072d3a-ead2-4311-b0bc-32059ed3816e",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "zpHBPSlSX3nA36Zs",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\n// Handle OpenAI Responses API format: output[0].content[0].text\nconst raw = item.output?.[0]?.content?.[0]?.text\n  || item.message?.content\n  || item.content\n  || item.text;\n\nif (!raw) {\n  throw new Error('Could not find AI text output. Full input was: ' + JSON.stringify(item).substring(0, 300));\n}\n\nlet parsed;\ntry {\n  const cleaned = raw.replace(/```json\\n?|\\n?```/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('AI response was not valid JSON: ' + raw.substring(0, 200));\n}\n\nreturn [{\n  json: {\n    linkedinPost: parsed.linkedin_post,\n    twitterThread: parsed.twitter_thread,\n    instagramCaption: parsed.instagram_caption\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        96
+      ],
+      "id": "5c170095-ef16-4410-b9fa-2bb5b0d0d23f",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0BGT7HGP6X",
+          "mode": "list",
+          "cachedResultName": "social"
+        },
+        "text": "={{ $json.slackText }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        864,
+        96
+      ],
+      "id": "35c617ed-6a00-4472-9847-817a19eabd46",
+      "name": "Send a message",
+      "webhookId": "f957b893-0ba8-46bb-94d8-6e7a26b9e7af",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "eXeGdR4Pg4aslU6G",
+          "name": "Slack OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nconst twitterFormatted = item.twitterThread\n  .map((tweet, i) => (i + 1) + '. ' + tweet)\n  .join('\\n\\n');\n\nconst slackText = '*New content ready for review* 📝\\n\\n' +\n  '*LinkedIn:*\\n' + item.linkedinPost + '\\n\\n' +\n  '*Twitter Thread:*\\n' + twitterFormatted + '\\n\\n' +\n  '*Instagram Caption:*\\n' + item.instagramCaption;\n\nreturn [{ json: { slackText } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        96
+      ],
+      "id": "5d5bfbc0-4b0d-4231-a78a-9db2e60d88ee",
+      "name": "Code in JavaScript2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "e564868a-3055-45f4-846e-6410a0c0879e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8917a8515959aaf1ce01e7574411a8f2c462e9eaa68b27fdc8310d45ab9ad757"
+  },
+  "nodeGroups": [],
+  "id": "tEXUMOuSyGELUkmE",
+  "tags": []
+}
